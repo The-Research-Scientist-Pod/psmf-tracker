@@ -813,6 +813,76 @@ input, select { font-family: inherit; color: inherit; }
   transform: scale(1.05);
 }
 
+/* Extra-slot styling — visually distinct from default protocol slots */
+.slot.extra {
+  border-color: var(--border);
+  background: var(--bg-elev-1);
+}
+.slot.extra .slot-name {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.slot.extra .slot-time {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* Remove-slot button — only appears on extras, hover-revealed */
+.slot-delete {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--bg-elev-3);
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1;
+  opacity: 0;
+  transition: all 0.2s var(--ease-out);
+  border: 1px solid var(--border);
+}
+.slot.extra:hover .slot-delete,
+.slot.extra .slot-delete:focus-visible {
+  opacity: 1;
+}
+.slot-delete:hover {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
+/* "+ Add another meal slot" button — sits below the slot list */
+.add-slot-btn {
+  margin-top: 4px;
+  padding: 14px 20px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  width: 100%;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s var(--ease-out);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.add-slot-btn:hover {
+  border-color: var(--protein);
+  color: var(--protein);
+  background: var(--protein-soft);
+}
+.add-slot-btn:active {
+  transform: scale(0.99);
+}
+
 /* ============================================================
    Library
    ============================================================ */
@@ -1601,7 +1671,7 @@ input, select { font-family: inherit; color: inherit; }
           <span class="macro-current" id="m-kcal-current">0</span>
           <span class="macro-unit">kcal</span>
         </div>
-        <div class="macro-target">target window <strong>1000–1250</strong></div>
+        <div class="macro-target">target window <strong>1000–1300</strong></div>
       </div>
       <div class="macro-ring-wrap">
         <svg class="macro-ring" viewBox="0 0 70 70">
@@ -1619,7 +1689,7 @@ input, select { font-family: inherit; color: inherit; }
           <span class="macro-current" id="m-protein-current">0</span>
           <span class="macro-unit">g</span>
         </div>
-        <div class="macro-target">floor <strong>150g</strong> · ideal 165g</div>
+        <div class="macro-target">floor <strong>200g</strong> · ideal 220g</div>
       </div>
       <div class="macro-ring-wrap">
         <svg class="macro-ring" viewBox="0 0 70 70">
@@ -1711,7 +1781,7 @@ input, select { font-family: inherit; color: inherit; }
       <strong id="userEmail">…</strong>
       <a class="signout-link" id="signOutBtn">sign out</a>
     </span>
-    <span>1.5 g/kg LBM protein · ≤30g fat · ≤30g carbs · 1000–1250 kcal</span>
+    <span>category 1 · ~2.7 g/kg LBM protein · ≤30g fat · ≤30g carbs · 1000–1300 kcal</span>
     <div class="fishoil-status">
       <span>Fish oil taken</span>
       <div class="fishoil-toggle" id="fishToggle"></div>
@@ -1791,28 +1861,47 @@ input, select { font-family: inherit; color: inherit; }
    security comes from Row Level Security policies in the database.
    ──────────────────────────────────────────────────────────── */
 const SUPABASE_CONFIG = {
-  url:     'https://dysyrwegcnohjgoqqonn.supabase.co',
-  anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR5c3lyd2VnY25vaGpnb3Fxb25uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg2NTE4MjUsImV4cCI6MjA5NDIyNzgyNX0.roeoNWwBWbC142G1ULFkI00qyAAp3lMvnbJlcgaBYjs'
+  url:     'https://YOUR-PROJECT-ID.supabase.co',
+  anonKey: 'YOUR-ANON-KEY-HERE'
 };
 
 /* ============================================================
    Constants: macro budgets for a PSMF day
    ============================================================ */
 const BUDGET = {
-  kcal:    { ideal: 1100, max: 1250, min: 1000 },
-  protein: { floor: 150,  ideal: 165 },
+  kcal:    { ideal: 1150, max: 1300, min: 1000 },
+  protein: { floor: 200,  ideal: 220 },
   fat:     { cap: 30 },
   carbs:   { cap: 30 }
 };
 
-/* The five meal slots in order, with suggested times and hints */
-const SLOTS = [
-  { id: 0, name: 'Post-walk breakfast', time: '09:30', hint: 'whey, yogurt, or pea protein' },
-  { id: 1, name: 'Lunch',               time: '13:00', hint: 'lean protein on big salad' },
-  { id: 2, name: 'Mid-afternoon snack', time: '16:30', hint: 'biltong + cottage cheese' },
-  { id: 3, name: 'Dinner',              time: '19:30', hint: 'white fish + steamed veg' },
-  { id: 4, name: 'Pre-bed casein',      time: '22:00', hint: 'cottage cheese or Greek yogurt' }
+/* The five default meal slots — these are the protocol structure and
+   cannot be deleted. Indices 5+ are "extra" slots that the user adds. */
+const DEFAULT_SLOTS = [
+  { name: 'Post-walk breakfast', time: '09:30', hint: 'whey, yogurt, or pea protein' },
+  { name: 'Lunch',               time: '13:00', hint: 'lean protein on big salad' },
+  { name: 'Mid-afternoon snack', time: '16:30', hint: 'biltong + cottage cheese' },
+  { name: 'Dinner',              time: '19:30', hint: 'white fish + steamed veg' },
+  { name: 'Pre-bed casein',      time: '22:00', hint: 'cottage cheese or Greek yogurt' }
 ];
+
+/* Returns the display metadata for any slot index. Indices 0-4 use the
+   default protocol structure; indices 5+ are generic "Extra meal" slots
+   with a flexible hint. */
+function getSlotMeta(index) {
+  if (index < DEFAULT_SLOTS.length) {
+    return { ...DEFAULT_SLOTS[index], isExtra: false };
+  }
+  return {
+    name: 'Extra meal',
+    time: 'extra',
+    hint: 'protein shake · snack · free veg…',
+    isExtra: true
+  };
+}
+
+/* Hard cap matching the database CHECK constraint */
+const MAX_SLOTS = 20;
 
 /* Default seed library — lives in client code, NOT in the database.
    Every user sees the same defaults; their custom meals come from Supabase. */
@@ -1872,13 +1961,20 @@ const INGREDIENTS = [
   { id: 'cheesestring', name: 'Mozzarella cheese string',  p: 25, f: 22,  c: 2.5, k: 310 },
   { id: 'broccoli',     name: 'Broccoli (cooked)',         p: 3,  f: 0.4, c: 7,   k: 35  },
   { id: 'spinach',      name: 'Spinach (raw)',             p: 3,  f: 0.4, c: 4,   k: 23  },
+  { id: 'rocket',       name: 'Rocket / arugula',          p: 2.6,f: 0.7, c: 3.7, k: 25  },
   { id: 'asparagus',    name: 'Asparagus',                 p: 2,  f: 0.1, c: 4,   k: 20  },
   { id: 'greenbeans',   name: 'Green beans',               p: 2,  f: 0.1, c: 7,   k: 31  },
   { id: 'cauliflower',  name: 'Cauliflower',               p: 2,  f: 0.3, c: 5,   k: 25  },
+  { id: 'cabbage',      name: 'Cabbage (raw)',             p: 1.3,f: 0.1, c: 5.8, k: 25  },
+  { id: 'celery',       name: 'Celery',                    p: 0.7,f: 0.2, c: 3,   k: 14  },
+  { id: 'radish',       name: 'Radish',                    p: 0.7,f: 0.1, c: 3.4, k: 16  },
   { id: 'mushrooms',    name: 'Mushrooms',                 p: 3,  f: 0.3, c: 3,   k: 22  },
   { id: 'pepper',       name: 'Bell pepper',               p: 1,  f: 0.3, c: 6,   k: 31  },
   { id: 'cucumber',     name: 'Cucumber',                  p: 0.7,f: 0.1, c: 4,   k: 16  },
   { id: 'tomato',       name: 'Tomato',                    p: 0.9,f: 0.2, c: 4,   k: 18  },
+  { id: 'gherkins',     name: 'Pickled gherkins',          p: 0.4,f: 0.2, c: 2,   k: 12  },
+  { id: 'kimchi',       name: 'Kimchi',                    p: 1,  f: 0.5, c: 2.4, k: 15  },
+  { id: 'sauerkraut',   name: 'Sauerkraut',                p: 1,  f: 0.1, c: 4,   k: 19  },
   { id: 'leaves',       name: 'Mixed salad leaves',        p: 1.5,f: 0.2, c: 3,   k: 20  },
   { id: 'oliveoil',     name: 'Olive oil',                 p: 0,  f: 100, c: 0,   k: 900 },
   { id: 'nooch',        name: 'Nutritional yeast',         p: 50, f: 4,   c: 36,  k: 380 }
@@ -1965,18 +2061,20 @@ async function deleteCustomMealRow(id) {
 }
 
 /* Fetch the slot assignments for one day (thursday or sunday).
-   Returns an array of length 5 with meal_id or null at each index. */
+   Returns a sparse array sized to fit the highest slot_index used.
+   Empty array if no rows exist yet. */
 async function fetchDayLog(dayKey) {
-  const log = [null, null, null, null, null];
   const { data, error } = await sb
     .from('day_logs')
     .select('slot_index, meal_id')
-    .eq('day_key', dayKey);
-  if (error) { console.error('fetchDayLog:', error); return log; }
-  (data || []).forEach(row => {
-    if (row.slot_index >= 0 && row.slot_index < 5) {
-      log[row.slot_index] = row.meal_id;
-    }
+    .eq('day_key', dayKey)
+    .order('slot_index');
+  if (error) { console.error('fetchDayLog:', error); return []; }
+  if (!data || data.length === 0) return [];
+  const maxIdx = Math.max(...data.map(r => r.slot_index));
+  const log = new Array(maxIdx + 1).fill(null);
+  data.forEach(row => {
+    if (row.slot_index >= 0) log[row.slot_index] = row.meal_id;
   });
   return log;
 }
@@ -2017,15 +2115,18 @@ async function clearDayRows(dayKey) {
    but we defensively create one if missing (e.g., if RLS or trigger failed). */
 async function fetchUserState() {
   const { data, error } = await sb.from('user_state').select('*').maybeSingle();
-  if (error) { console.error('fetchUserState:', error); return { streak: 0, fishoil: false }; }
+  const fallback = { streak: 0, fishoil: false, thursday_slots: 5, sunday_slots: 5 };
+  if (error) { console.error('fetchUserState:', error); return fallback; }
   if (!data) {
-    // No row — create one
-    if (currentUser) {
-      await sb.from('user_state').insert({ user_id: currentUser.id });
-    }
-    return { streak: 0, fishoil: false };
+    if (currentUser) await sb.from('user_state').insert({ user_id: currentUser.id });
+    return fallback;
   }
-  return { streak: data.streak || 0, fishoil: !!data.fishoil };
+  return {
+    streak: data.streak || 0,
+    fishoil: !!data.fishoil,
+    thursday_slots: data.thursday_slots || 5,
+    sunday_slots: data.sunday_slots || 5
+  };
 }
 
 /* Update user_state. Uses upsert so missing rows are handled gracefully. */
@@ -2123,8 +2224,8 @@ function hideAppShowAuth() {
   document.getElementById('authScreen').classList.add('visible');
   // Reset state so a different user's data can't bleed across
   state.meals = [];
-  state.logs.thursday = [null,null,null,null,null];
-  state.logs.sunday   = [null,null,null,null,null];
+  state.logs.thursday = new Array(DEFAULT_SLOTS.length).fill(null);
+  state.logs.sunday   = new Array(DEFAULT_SLOTS.length).fill(null);
   state.streak = 0;
   state.fishoil = false;
 }
@@ -2143,8 +2244,16 @@ async function initAuthenticatedApp(user) {
 
   // Merge default + custom meals (customs first so they show at the top)
   state.meals = [...customMeals, ...DEFAULT_MEALS];
-  state.logs.thursday = thuLog;
-  state.logs.sunday   = sunLog;
+
+  // Size each day's log to the max of: stored slot count, actual data length,
+  // and the default of 5. This recovers gracefully from any inconsistency.
+  const thuCount = Math.max(userState.thursday_slots, thuLog.length, DEFAULT_SLOTS.length);
+  const sunCount = Math.max(userState.sunday_slots,   sunLog.length, DEFAULT_SLOTS.length);
+  state.logs.thursday = new Array(thuCount).fill(null);
+  state.logs.sunday   = new Array(sunCount).fill(null);
+  thuLog.forEach((id, i) => { if (i < thuCount) state.logs.thursday[i] = id; });
+  sunLog.forEach((id, i) => { if (i < sunCount) state.logs.sunday[i]   = id; });
+
   state.streak  = userState.streak;
   state.fishoil = userState.fishoil;
 
@@ -2275,19 +2384,15 @@ function renderSlots() {
   const log = state.logs[state.currentDay];
   container.innerHTML = '';
 
-  SLOTS.forEach((slot, i) => {
-    const mealId = log[i];
+  log.forEach((mealId, i) => {
+    const slot = getSlotMeta(i);
     const meal = mealId ? state.meals.find(m => m.id === mealId) : null;
     const el = document.createElement('div');
-    el.className = 'slot' + (meal ? ' filled' : '');
+    el.className = 'slot' + (meal ? ' filled' : '') + (slot.isExtra ? ' extra' : '');
     el.dataset.slotIndex = i;
-    if (meal) {
-      el.innerHTML = `
-        <div class="slot-index">0${i+1}</div>
-        <div class="slot-meta">
-          <div class="slot-name">${slot.name}</div>
-          <div class="slot-time">${slot.time}</div>
-        </div>
+    const indexLabel = String(i + 1).padStart(2, '0');
+
+    const mealBlock = meal ? `
         <div class="slot-meal">
           <div>
             <div class="slot-meal-title">${escapeHtml(meal.name)}</div>
@@ -2298,27 +2403,51 @@ function renderSlots() {
               <span class="m-carbs">${meal.carbs}C</span>
             </div>
           </div>
-          <button class="slot-remove" data-remove="${i}" title="Remove">×</button>
+          <button class="slot-remove" data-remove="${i}" title="Clear meal">×</button>
         </div>
-      `;
-    } else {
-      el.innerHTML = `
-        <div class="slot-index">0${i+1}</div>
-        <div class="slot-meta">
-          <div class="slot-name">${slot.name}</div>
-          <div class="slot-time">${slot.time}</div>
-        </div>
-        <div class="slot-empty-hint">${slot.hint}</div>
-      `;
-    }
+    ` : `<div class="slot-empty-hint">${slot.hint}</div>`;
+
+    const deleteSlotBtn = slot.isExtra
+      ? `<button class="slot-delete" data-delete-slot="${i}" title="Remove this slot">−</button>`
+      : '';
+
+    el.innerHTML = `
+      <div class="slot-index">${indexLabel}</div>
+      <div class="slot-meta">
+        <div class="slot-name">${slot.name}</div>
+        <div class="slot-time">${slot.time}</div>
+      </div>
+      ${mealBlock}
+      ${deleteSlotBtn}
+    `;
     container.appendChild(el);
   });
 
+  // Append the "+ Add another meal slot" button (unless at hard cap)
+  if (log.length < MAX_SLOTS) {
+    const addBtn = document.createElement('button');
+    addBtn.className = 'add-slot-btn';
+    addBtn.id = 'addSlotBtn';
+    addBtn.innerHTML = '＋ Add another meal slot';
+    addBtn.addEventListener('click', addExtraSlot);
+    container.appendChild(addBtn);
+  }
+
+  // Bind clear-meal buttons (× on filled meals)
   container.querySelectorAll('[data-remove]').forEach(btn => {
     btn.addEventListener('click', e => {
       e.stopPropagation();
       const idx = parseInt(btn.dataset.remove);
       removeMealFromSlot(idx);
+    });
+  });
+
+  // Bind delete-slot buttons (− on extra slots, removes the slot entirely)
+  container.querySelectorAll('[data-delete-slot]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.deleteSlot);
+      removeExtraSlot(idx);
     });
   });
 }
@@ -2455,8 +2584,9 @@ async function removeMealFromSlot(slotIdx) {
 }
 
 async function resetDay() {
-  state.logs[state.currentDay] = [null,null,null,null,null];
-  await clearDayRows(state.currentDay);
+  const day = state.currentDay;
+  state.logs[day] = new Array(state.logs[day].length).fill(null);
+  await clearDayRows(day);
   renderSlots();
   renderTotals();
 }
@@ -2476,6 +2606,35 @@ async function deleteCustomMeal(id) {
   });
   await deleteCustomMealRow(id);
   renderLibrary();
+  renderSlots();
+  renderTotals();
+}
+
+/* Append a new empty slot at the end of the current day */
+async function addExtraSlot() {
+  const day = state.currentDay;
+  if (state.logs[day].length >= MAX_SLOTS) return;
+  state.logs[day].push(null);
+  await updateUserState({ [day + '_slots']: state.logs[day].length });
+  renderSlots();
+}
+
+/* Remove an extra slot entirely. Default slots (0-4) cannot be removed.
+   When a slot in the middle is removed, subsequent slots renumber, so
+   we rewrite the entire day's slot rows to keep slot_index consistent. */
+async function removeExtraSlot(slotIndex) {
+  const day = state.currentDay;
+  if (slotIndex < DEFAULT_SLOTS.length) return;
+  if (slotIndex >= state.logs[day].length) return;
+
+  state.logs[day].splice(slotIndex, 1);
+  await clearDayRows(day);
+  for (let i = 0; i < state.logs[day].length; i++) {
+    if (state.logs[day][i]) {
+      await upsertSlot(day, i, state.logs[day][i]);
+    }
+  }
+  await updateUserState({ [day + '_slots']: state.logs[day].length });
   renderSlots();
   renderTotals();
 }
