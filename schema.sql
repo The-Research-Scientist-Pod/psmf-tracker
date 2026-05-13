@@ -51,7 +51,7 @@ CREATE INDEX IF NOT EXISTS meals_user_id_idx ON public.meals(user_id);
 CREATE TABLE IF NOT EXISTS public.day_logs (
   user_id     UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   day_key     TEXT NOT NULL CHECK (day_key IN ('thursday', 'sunday')),
-  slot_index  INT NOT NULL CHECK (slot_index BETWEEN 0 AND 4),
+  slot_index  INT NOT NULL CHECK (slot_index BETWEEN 0 AND 19),
   meal_id     TEXT NOT NULL,
   updated_at  TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (user_id, day_key, slot_index)
@@ -65,10 +65,12 @@ CREATE TABLE IF NOT EXISTS public.day_logs (
 -- Holds simple top-level state that doesn't deserve its own table.
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS public.user_state (
-  user_id     UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  streak      INT DEFAULT 0,
-  fishoil     BOOLEAN DEFAULT FALSE,
-  updated_at  TIMESTAMPTZ DEFAULT NOW()
+  user_id          UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  streak           INT DEFAULT 0,
+  fishoil          BOOLEAN DEFAULT FALSE,
+  thursday_slots   INT DEFAULT 5,
+  sunday_slots     INT DEFAULT 5,
+  updated_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
 
