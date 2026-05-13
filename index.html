@@ -1,0 +1,2824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>PSMF Planner</title>
+
+<!--
+  Supabase JS client (UMD build).
+  Exposes a global `supabase` object with a createClient(url, key) method.
+  Loaded synchronously so it's available before our application script runs.
+-->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+/* ============================================================
+   PSMF Tracker — design tokens
+   Same instrument-panel aesthetic as the artifact version,
+   extended with an auth screen and a user-info row in the footer.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@300;400;500;600;700&display=swap');
+
+:root {
+  /* Surfaces */
+  --bg: #0a0c10;
+  --bg-elev-1: #11141b;
+  --bg-elev-2: #161a23;
+  --bg-elev-3: #1c2230;
+  --bg-overlay: rgba(10, 12, 16, 0.85);
+  --border: #232936;
+  --border-strong: #2d3548;
+  --border-focus: #3d4a66;
+
+  /* Text */
+  --text-primary: #e7ecf3;
+  --text-secondary: #98a2b6;
+  --text-tertiary: #5d6680;
+  --text-muted: #424a5e;
+
+  /* Macro semantic colors */
+  --kcal: #c4b5fd;
+  --kcal-glow: rgba(196, 181, 253, 0.18);
+  --kcal-soft: rgba(196, 181, 253, 0.08);
+
+  --protein: #6ee7b7;
+  --protein-glow: rgba(110, 231, 183, 0.18);
+  --protein-soft: rgba(110, 231, 183, 0.08);
+
+  --fat: #fbbf24;
+  --fat-glow: rgba(251, 191, 36, 0.20);
+  --fat-soft: rgba(251, 191, 36, 0.08);
+
+  --carbs: #60a5fa;
+  --carbs-glow: rgba(96, 165, 250, 0.18);
+  --carbs-soft: rgba(96, 165, 250, 0.08);
+
+  /* Status */
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+
+  /* Typography */
+  --font-display: 'Fraunces', Georgia, serif;
+  --font-body: 'Geist', -apple-system, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: 'ss01', 'cv11';
+  overflow-x: hidden;
+  min-height: 100vh;
+}
+
+/* Subtle atmospheric background — applies behind both auth and app */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(110, 231, 183, 0.04), transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(96, 165, 250, 0.04), transparent 50%),
+    radial-gradient(ellipse at 50% 50%, rgba(196, 181, 253, 0.02), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Grain overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.95' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0.3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.4;
+  mix-blend-mode: overlay;
+  pointer-events: none;
+  z-index: 1;
+}
+
+button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+input, select { font-family: inherit; color: inherit; }
+
+/* ============================================================
+   Initial loading state (shown until auth check completes)
+   ============================================================ */
+.boot-loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+  background: var(--bg);
+  flex-direction: column;
+  gap: 16px;
+  transition: opacity 0.3s var(--ease-out);
+}
+
+.boot-loading.hidden { opacity: 0; pointer-events: none; }
+
+.boot-mark {
+  width: 48px; height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--bg-elev-3), var(--bg-elev-2));
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 28px;
+  font-style: italic;
+  color: var(--protein);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: boot-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes boot-pulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.05); }
+}
+
+.boot-text {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--text-tertiary);
+}
+
+/* ============================================================
+   Authentication screen
+   ============================================================ */
+.auth-screen {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 500;
+  padding: 24px;
+  position: relative;
+  z-index: 3;
+}
+
+.auth-screen.visible { display: flex; }
+
+.auth-card {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 40px 36px 36px;
+  width: 100%;
+  max-width: 420px;
+  text-align: center;
+  position: relative;
+  box-shadow: 0 32px 64px rgba(0, 0, 0, 0.4);
+  animation: auth-card-in 0.5s var(--ease-spring);
+}
+
+@keyframes auth-card-in {
+  from { opacity: 0; transform: translateY(20px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+.auth-mark {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 22px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--bg-elev-3), var(--bg-elev-2));
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 32px;
+  font-style: italic;
+  color: var(--protein);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 30px;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+}
+
+.auth-subtitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-tertiary);
+  margin-bottom: 26px;
+}
+
+.auth-tabs {
+  display: flex;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  margin-bottom: 18px;
+  gap: 2px;
+}
+
+.auth-tab {
+  flex: 1;
+  padding: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 7px;
+  transition: all 0.25s var(--ease-out);
+}
+
+.auth-tab:hover { color: var(--text-primary); }
+
+.auth-tab.active {
+  background: var(--bg-elev-3);
+  color: var(--text-primary);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+}
+
+.auth-input {
+  padding: 12px 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+.auth-input:focus { border-color: var(--border-focus); background: var(--bg-elev-3); }
+.auth-input::placeholder { color: var(--text-muted); }
+
+.btn-auth-submit {
+  padding: 13px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #04140d;
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 10px;
+  margin-top: 6px;
+  transition: all 0.2s var(--ease-out);
+  border: 1px solid rgba(110,231,183,0.3);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.2);
+  letter-spacing: 0.01em;
+}
+.btn-auth-submit:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+}
+.btn-auth-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.auth-message {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  margin-top: 4px;
+  min-height: 16px;
+  letter-spacing: 0.02em;
+  text-align: center;
+  line-height: 1.4;
+}
+.auth-message.error   { color: var(--danger); }
+.auth-message.success { color: var(--protein); }
+
+.auth-footer {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ============================================================
+   App shell (only visible once logged in)
+   ============================================================ */
+.app {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: 24px 32px 48px;
+  display: none;
+}
+
+.app.visible { display: block; }
+
+/* ============================================================
+   Configuration error banner (shown if Supabase config is missing)
+   ============================================================ */
+.config-error {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--bg);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  flex-direction: column;
+}
+
+.config-error.visible { display: flex; }
+
+.config-card {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--danger);
+  border-radius: 14px;
+  padding: 28px;
+  max-width: 560px;
+  text-align: left;
+}
+
+.config-card h1 {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: 22px;
+  margin-bottom: 12px;
+  color: var(--danger);
+}
+
+.config-card p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+  line-height: 1.6;
+}
+
+.config-card code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-elev-2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--protein);
+}
+
+/* ============================================================
+   Header
+   ============================================================ */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 0 28px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 28px;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--bg-elev-3), var(--bg-elev-2));
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 22px;
+  font-style: italic;
+  color: var(--protein);
+  position: relative;
+  top: 4px;
+}
+
+.brand-title {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  font-style: italic;
+}
+
+.brand-subtitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+
+.day-tabs {
+  display: flex;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px;
+  gap: 2px;
+}
+
+.day-tab {
+  padding: 9px 22px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  border-radius: 8px;
+  transition: all 0.25s var(--ease-out);
+  font-family: var(--font-body);
+  letter-spacing: 0.01em;
+}
+
+.day-tab:hover { color: var(--text-primary); }
+
+.day-tab.active {
+  background: var(--bg-elev-3);
+  color: var(--text-primary);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.05) inset, 0 1px 2px rgba(0,0,0,0.3);
+}
+
+.day-tab .tab-date {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  margin-left: 8px;
+  letter-spacing: 0.05em;
+}
+
+.streak {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.streak-icon {
+  font-size: 16px;
+  filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.5));
+}
+
+.streak-value {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-style: italic;
+}
+
+.streak-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* ============================================================
+   Macro dashboard
+   ============================================================ */
+.macros {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.macro-card {
+  position: relative;
+  padding: 22px;
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 20px;
+  overflow: hidden;
+  transition: all 0.4s var(--ease-out);
+}
+
+.macro-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--macro-soft, transparent);
+  opacity: 0.5;
+  pointer-events: none;
+  transition: opacity 0.4s var(--ease-out);
+}
+
+.macro-card.met {
+  border-color: var(--macro-color);
+  box-shadow: 0 0 0 1px var(--macro-color), 0 0 30px var(--macro-glow);
+}
+
+.macro-card.over {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger), 0 0 30px rgba(248, 113, 113, 0.2);
+}
+
+.macro-info { position: relative; z-index: 1; }
+
+.macro-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--text-tertiary);
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.macro-label::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--macro-color);
+  box-shadow: 0 0 8px var(--macro-glow);
+}
+
+.macro-number {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.macro-current {
+  font-family: var(--font-display);
+  font-size: 36px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+  line-height: 1;
+  font-style: italic;
+}
+
+.macro-unit {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.macro-target {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+  margin-top: 6px;
+}
+
+.macro-target strong { color: var(--text-primary); font-weight: 500; }
+
+.macro-ring-wrap {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+}
+
+.macro-ring {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.ring-bg {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 5;
+}
+
+.ring-fill {
+  fill: none;
+  stroke: var(--macro-color);
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-dasharray: 188.5;
+  stroke-dashoffset: 188.5;
+  transition: stroke-dashoffset 0.8s var(--ease-out), stroke 0.4s ease;
+  filter: drop-shadow(0 0 6px var(--macro-glow));
+}
+
+.ring-pct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.macro-card[data-macro="kcal"]   { --macro-color: var(--kcal); --macro-glow: var(--kcal-glow); --macro-soft: var(--kcal-soft); }
+.macro-card[data-macro="protein"]{ --macro-color: var(--protein); --macro-glow: var(--protein-glow); --macro-soft: var(--protein-soft); }
+.macro-card[data-macro="fat"]    { --macro-color: var(--fat); --macro-glow: var(--fat-glow); --macro-soft: var(--fat-soft); }
+.macro-card[data-macro="carbs"]  { --macro-color: var(--carbs); --macro-glow: var(--carbs-glow); --macro-soft: var(--carbs-soft); }
+
+/* ============================================================
+   Main planner
+   ============================================================ */
+.planner {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.section-title {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-left: 4px;
+}
+
+.section-title h2 {
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-style: italic;
+}
+
+.section-title .helper {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.06em;
+}
+
+.slots { display: flex; flex-direction: column; gap: 10px; }
+
+.slot {
+  padding: 16px 20px;
+  background: var(--bg-elev-1);
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  min-height: 88px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  transition: all 0.25s var(--ease-out);
+  position: relative;
+}
+
+.slot.drag-over {
+  border-style: solid;
+  border-color: var(--protein);
+  background: var(--protein-soft);
+  transform: scale(1.01);
+  box-shadow: 0 0 0 1px var(--protein), 0 8px 24px var(--protein-glow);
+}
+
+.slot.filled {
+  border-style: solid;
+  border-color: var(--border-strong);
+  background: var(--bg-elev-2);
+}
+
+.slot-index {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+  width: 22px;
+}
+
+.slot-meta { min-width: 130px; flex-shrink: 0; }
+
+.slot-name {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.slot-time {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.06em;
+}
+
+.slot-empty-hint {
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+  flex: 1;
+}
+
+.slot-meal {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  animation: slot-meal-in 0.4s var(--ease-spring);
+}
+
+@keyframes slot-meal-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+
+.slot-meal-title {
+  font-family: var(--font-body);
+  font-weight: 500;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.slot-meal-macros {
+  display: flex;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  letter-spacing: 0.02em;
+}
+
+.slot-meal-macros span { display: inline-flex; align-items: center; gap: 4px; }
+.slot-meal-macros .m-kcal    { color: var(--kcal); }
+.slot-meal-macros .m-protein { color: var(--protein); }
+.slot-meal-macros .m-fat     { color: var(--fat); }
+.slot-meal-macros .m-carbs   { color: var(--carbs); }
+
+.slot-remove {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: var(--bg-elev-3);
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  transition: all 0.2s var(--ease-out);
+  flex-shrink: 0;
+}
+
+.slot-remove:hover {
+  background: var(--danger);
+  color: white;
+  transform: scale(1.05);
+}
+
+/* ============================================================
+   Library
+   ============================================================ */
+.library {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  position: sticky;
+  top: 24px;
+}
+
+.library-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.search-input {
+  flex: 1;
+  padding: 10px 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.search-input:focus { border-color: var(--border-focus); }
+.search-input::placeholder { color: var(--text-muted); }
+
+.btn-build {
+  padding: 10px 16px;
+  background: linear-gradient(135deg, var(--bg-elev-3), var(--bg-elev-2));
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: all 0.2s var(--ease-out);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-build:hover {
+  border-color: var(--protein);
+  color: var(--protein);
+  box-shadow: 0 0 16px var(--protein-glow);
+}
+
+.library-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  padding: 6px 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  transition: all 0.2s;
+}
+
+.chip:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+.chip.active {
+  background: var(--bg-elev-3);
+  border-color: var(--border-focus);
+  color: var(--text-primary);
+}
+
+.meal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  max-height: 600px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.meal-grid::-webkit-scrollbar { width: 6px; }
+.meal-grid::-webkit-scrollbar-track { background: transparent; }
+.meal-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.meal-grid::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+.meal-card {
+  position: relative;
+  padding: 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  cursor: grab;
+  transition: all 0.2s var(--ease-out);
+  touch-action: none;
+  user-select: none;
+}
+
+.meal-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elev-3);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0,0,0,0.3);
+}
+
+.meal-card:active { cursor: grabbing; }
+
+.meal-card.custom::before {
+  content: 'CUSTOM';
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  color: var(--protein);
+  background: var(--protein-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.meal-card-name {
+  font-weight: 500;
+  font-size: 13px;
+  margin-bottom: 4px;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+}
+
+.meal-card-desc {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-bottom: 10px;
+  line-height: 1.4;
+  min-height: 32px;
+}
+
+.meal-card-macros {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.meal-card-macros > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--bg-elev-1);
+  border-radius: 6px;
+}
+
+.meal-card-macros .v {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.meal-card-macros .l {
+  color: var(--text-muted);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.meal-card-macros .v.m-kcal    { color: var(--kcal); }
+.meal-card-macros .v.m-protein { color: var(--protein); }
+.meal-card-macros .v.m-fat     { color: var(--fat); }
+.meal-card-macros .v.m-carbs   { color: var(--carbs); }
+
+.meal-card-delete {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  background: var(--bg-elev-3);
+  color: var(--text-muted);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  opacity: 0;
+  transition: all 0.2s;
+}
+
+.meal-card.custom .meal-card-delete { display: inline-flex; }
+.meal-card.custom:hover .meal-card-delete { opacity: 1; }
+.meal-card-delete:hover { background: var(--danger); color: white; }
+
+.drag-ghost {
+  position: fixed;
+  pointer-events: none;
+  z-index: 1000;
+  width: 240px;
+  opacity: 0.92;
+  transform: scale(1.04) rotate(-1deg);
+  box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+  border-color: var(--protein) !important;
+}
+
+.burst {
+  position: absolute;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--protein);
+  pointer-events: none;
+  animation: burst 0.7s var(--ease-out) forwards;
+}
+
+@keyframes burst {
+  0%   { transform: translate(0,0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--bx, 0), var(--by, 0)) scale(0); opacity: 0; }
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
+.btn {
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  transition: all 0.2s var(--ease-out);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.01em;
+}
+
+.btn-ghost {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+}
+.btn-ghost:hover { color: var(--text-primary); border-color: var(--border-strong); }
+
+.btn-primary {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #04140d;
+  font-weight: 600;
+  border: 1px solid rgba(110,231,183,0.3);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+}
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-overlay);
+  backdrop-filter: blur(8px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fade-in 0.25s var(--ease-out);
+}
+
+.modal-overlay.open { display: flex; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.modal {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border-strong);
+  border-radius: 18px;
+  padding: 28px;
+  width: 100%;
+  max-width: 720px;
+  max-height: 88vh;
+  overflow-y: auto;
+  animation: modal-in 0.35s var(--ease-spring);
+  position: relative;
+}
+
+@keyframes modal-in {
+  from { opacity: 0; transform: translateY(20px) scale(0.96); }
+  to   { opacity: 1; transform: none; }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 22px;
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: -0.01em;
+}
+
+.modal-subtitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.modal-close {
+  position: absolute;
+  top: 22px;
+  right: 22px;
+  width: 32px; height: 32px;
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  transition: all 0.2s;
+}
+.modal-close:hover { background: var(--bg-elev-3); color: var(--text-primary); }
+
+.builder-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+}
+
+.builder-section h3 {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+}
+
+.ingredient-list {
+  max-height: 260px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-right: 6px;
+}
+
+.ing-item {
+  padding: 10px 12px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+
+.ing-item:hover { border-color: var(--border-strong); background: var(--bg-elev-3); }
+
+.ing-name { font-weight: 500; }
+
+.ing-macros {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.btn-add-ing {
+  padding: 4px 10px;
+  background: var(--bg-elev-3);
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--protein);
+  transition: all 0.15s;
+}
+.btn-add-ing:hover { background: var(--protein); color: var(--bg); }
+
+.added-list {
+  min-height: 120px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--bg-elev-2);
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.added-list:empty::before {
+  content: 'No ingredients yet — add from the left';
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 12px;
+  display: block;
+  text-align: center;
+  margin-top: 40px;
+}
+
+.added-item {
+  display: grid;
+  grid-template-columns: 1fr 80px 28px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-elev-3);
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.added-item input {
+  background: var(--bg-elev-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  width: 100%;
+  text-align: right;
+  outline: none;
+}
+.added-item input:focus { border-color: var(--border-focus); }
+
+.added-remove {
+  width: 24px; height: 24px;
+  border-radius: 6px;
+  background: var(--bg-elev-1);
+  color: var(--text-tertiary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+.added-remove:hover { background: var(--danger); color: white; }
+
+.builder-totals {
+  margin-top: 16px;
+  padding: 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.bt-cell { text-align: center; }
+.bt-cell .v {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  font-style: italic;
+}
+.bt-cell .l {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+.bt-cell.kcal    .v { color: var(--kcal); }
+.bt-cell.protein .v { color: var(--protein); }
+.bt-cell.fat     .v { color: var(--fat); }
+.bt-cell.carbs   .v { color: var(--carbs); }
+
+.modal-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.text-input {
+  flex: 1;
+  padding: 11px 14px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 13px;
+  outline: none;
+}
+.text-input:focus { border-color: var(--border-focus); }
+
+/* Celebration */
+.celebration {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.celebration.show { display: flex; }
+
+.celebration-card {
+  background: linear-gradient(180deg, var(--bg-elev-2), var(--bg-elev-1));
+  border: 1px solid var(--protein);
+  border-radius: 20px;
+  padding: 32px 44px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6), 0 0 80px var(--protein-glow);
+  animation: cel-in 0.6s var(--ease-spring);
+  position: relative;
+  overflow: hidden;
+}
+
+@keyframes cel-in {
+  0%   { opacity: 0; transform: translateY(20px) scale(0.85); }
+  100% { opacity: 1; transform: none; }
+}
+
+.celebration-card::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  background: linear-gradient(135deg, var(--protein), transparent 50%, var(--kcal));
+  opacity: 0.3;
+  z-index: -1;
+  border-radius: 22px;
+}
+
+.cel-title {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: -0.02em;
+  margin-bottom: 6px;
+  background: linear-gradient(135deg, var(--protein), var(--kcal));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.cel-subtitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 18px;
+}
+
+.cel-totals {
+  display: flex;
+  gap: 18px;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.cel-totals span { color: var(--text-tertiary); }
+.cel-totals strong {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 500;
+  font-style: italic;
+  display: block;
+  font-variant-numeric: tabular-nums;
+}
+
+.confetti {
+  position: absolute;
+  width: 8px; height: 14px;
+  pointer-events: none;
+  opacity: 0;
+}
+
+@keyframes confetti-fall {
+  0%   { opacity: 1; transform: translateY(0) rotate(0deg); }
+  100% { opacity: 0; transform: translateY(80vh) rotate(720deg); }
+}
+
+/* ============================================================
+   Footer with user info, protocol summary, fish oil toggle
+   ============================================================ */
+.app-footer {
+  margin-top: 32px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.app-footer .user-info {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-footer .user-info strong {
+  color: var(--text-secondary);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0.04em;
+}
+
+.app-footer .signout-link {
+  color: var(--text-tertiary);
+  text-decoration: none;
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  transition: all 0.2s;
+  cursor: pointer;
+}
+
+.app-footer .signout-link:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.fishoil-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fishoil-toggle {
+  width: 32px; height: 18px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.fishoil-toggle::after {
+  content: '';
+  position: absolute;
+  top: 1px; left: 1px;
+  width: 14px; height: 14px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  transition: all 0.25s var(--ease-out);
+}
+
+.fishoil-toggle.on { background: var(--fat-soft); border-color: var(--fat); }
+.fishoil-toggle.on::after {
+  left: 15px;
+  background: var(--fat);
+  box-shadow: 0 0 8px var(--fat-glow);
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width: 1100px) {
+  .planner { grid-template-columns: 1fr; }
+  .library { position: static; }
+  .meal-grid { max-height: 480px; }
+}
+
+@media (max-width: 720px) {
+  .app { padding: 16px 16px 32px; }
+  .header { flex-direction: column; gap: 16px; align-items: flex-start; }
+  .macros { grid-template-columns: 1fr 1fr; }
+  .builder-grid { grid-template-columns: 1fr; }
+  .app-footer { flex-direction: column; align-items: flex-start; }
+}
+
+</style>
+</head>
+<body>
+
+<!-- ============================================================
+     Boot loading state (visible until auth check completes)
+     ============================================================ -->
+<div class="boot-loading" id="bootLoading">
+  <div class="boot-mark">P</div>
+  <div class="boot-text">connecting…</div>
+</div>
+
+<!-- ============================================================
+     Config error (shown if Supabase credentials are missing)
+     ============================================================ -->
+<div class="config-error" id="configError">
+  <div class="config-card">
+    <h1>Configuration required</h1>
+    <p>This app needs Supabase credentials to function. Open <code>index.html</code> in your editor, find the <code>SUPABASE_CONFIG</code> block near the top of the script, and paste in your project URL and anon key from Supabase Settings → API.</p>
+    <p>See the README for full setup steps.</p>
+  </div>
+</div>
+
+<!-- ============================================================
+     Auth screen
+     ============================================================ -->
+<div class="auth-screen" id="authScreen">
+  <div class="auth-card">
+    <div class="auth-mark">P</div>
+    <div class="auth-title">PSMF Planner</div>
+    <div class="auth-subtitle">sign in to continue</div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" data-auth-tab="signin">Sign in</button>
+      <button class="auth-tab" data-auth-tab="signup">Create account</button>
+    </div>
+
+    <form class="auth-form" id="authForm" autocomplete="on">
+      <input
+        type="email"
+        class="auth-input"
+        id="authEmail"
+        placeholder="email@example.com"
+        autocomplete="email"
+        required
+      />
+      <input
+        type="password"
+        class="auth-input"
+        id="authPassword"
+        placeholder="password (min 6 characters)"
+        autocomplete="current-password"
+        minlength="6"
+        required
+      />
+      <button type="submit" class="btn-auth-submit" id="authSubmit">
+        <span id="authSubmitText">Sign in</span>
+      </button>
+      <div class="auth-message" id="authMessage"></div>
+    </form>
+
+    <div class="auth-footer">protocol · two days · sustained recomposition</div>
+  </div>
+</div>
+
+<!-- ============================================================
+     Main application (visible after sign-in)
+     ============================================================ -->
+<div class="app" id="app">
+  <header class="header">
+    <div class="brand">
+      <span class="brand-mark">P</span>
+      <div>
+        <div class="brand-title">PSMF Planner</div>
+        <div class="brand-subtitle">protein-sparing modified fast</div>
+      </div>
+    </div>
+    <nav class="day-tabs" id="dayTabs">
+      <button class="day-tab active" data-day="thursday">Thursday<span class="tab-date" id="thu-date"></span></button>
+      <button class="day-tab" data-day="sunday">Sunday<span class="tab-date" id="sun-date"></span></button>
+    </nav>
+    <div class="streak">
+      <span class="streak-icon">⚡</span>
+      <span class="streak-value" id="streakValue">0</span>
+      <span class="streak-label">days complete</span>
+    </div>
+  </header>
+
+  <section class="macros" id="macros">
+    <div class="macro-card" data-macro="kcal">
+      <div class="macro-info">
+        <div class="macro-label">Calories</div>
+        <div class="macro-number">
+          <span class="macro-current" id="m-kcal-current">0</span>
+          <span class="macro-unit">kcal</span>
+        </div>
+        <div class="macro-target">target window <strong>1000–1250</strong></div>
+      </div>
+      <div class="macro-ring-wrap">
+        <svg class="macro-ring" viewBox="0 0 70 70">
+          <circle class="ring-bg" cx="35" cy="35" r="30"/>
+          <circle class="ring-fill" id="ring-kcal" cx="35" cy="35" r="30"/>
+        </svg>
+        <div class="ring-pct" id="pct-kcal">0%</div>
+      </div>
+    </div>
+
+    <div class="macro-card" data-macro="protein">
+      <div class="macro-info">
+        <div class="macro-label">Protein</div>
+        <div class="macro-number">
+          <span class="macro-current" id="m-protein-current">0</span>
+          <span class="macro-unit">g</span>
+        </div>
+        <div class="macro-target">floor <strong>150g</strong> · ideal 165g</div>
+      </div>
+      <div class="macro-ring-wrap">
+        <svg class="macro-ring" viewBox="0 0 70 70">
+          <circle class="ring-bg" cx="35" cy="35" r="30"/>
+          <circle class="ring-fill" id="ring-protein" cx="35" cy="35" r="30"/>
+        </svg>
+        <div class="ring-pct" id="pct-protein">0%</div>
+      </div>
+    </div>
+
+    <div class="macro-card" data-macro="fat">
+      <div class="macro-info">
+        <div class="macro-label">Fat</div>
+        <div class="macro-number">
+          <span class="macro-current" id="m-fat-current">0</span>
+          <span class="macro-unit">g</span>
+        </div>
+        <div class="macro-target">cap <strong>30g</strong> · incl. fish oil 10g</div>
+      </div>
+      <div class="macro-ring-wrap">
+        <svg class="macro-ring" viewBox="0 0 70 70">
+          <circle class="ring-bg" cx="35" cy="35" r="30"/>
+          <circle class="ring-fill" id="ring-fat" cx="35" cy="35" r="30"/>
+        </svg>
+        <div class="ring-pct" id="pct-fat">0%</div>
+      </div>
+    </div>
+
+    <div class="macro-card" data-macro="carbs">
+      <div class="macro-info">
+        <div class="macro-label">Carbs</div>
+        <div class="macro-number">
+          <span class="macro-current" id="m-carbs-current">0</span>
+          <span class="macro-unit">g</span>
+        </div>
+        <div class="macro-target">cap <strong>30g</strong> · from veg + dairy</div>
+      </div>
+      <div class="macro-ring-wrap">
+        <svg class="macro-ring" viewBox="0 0 70 70">
+          <circle class="ring-bg" cx="35" cy="35" r="30"/>
+          <circle class="ring-fill" id="ring-carbs" cx="35" cy="35" r="30"/>
+        </svg>
+        <div class="ring-pct" id="pct-carbs">0%</div>
+      </div>
+    </div>
+  </section>
+
+  <main class="planner">
+    <div>
+      <div class="section-title">
+        <h2>Today's Plan</h2>
+        <span class="helper">drag meals into slots</span>
+      </div>
+      <div class="slots" id="slots"></div>
+
+      <div class="actions">
+        <button class="btn btn-ghost" id="resetBtn">↺  Reset day</button>
+        <button class="btn btn-primary" id="logBtn">Log day · +1 streak</button>
+      </div>
+    </div>
+
+    <aside class="library">
+      <div class="section-title">
+        <h2>Meal Library</h2>
+        <span class="helper" id="libCount">0 meals</span>
+      </div>
+
+      <div class="library-search">
+        <input type="text" class="search-input" id="searchInput" placeholder="Search meals or ingredients…"/>
+        <button class="btn-build" id="openBuilder">＋ Build meal</button>
+      </div>
+
+      <div class="library-filters" id="filters">
+        <button class="chip active" data-filter="all">All</button>
+        <button class="chip" data-filter="breakfast">Breakfast</button>
+        <button class="chip" data-filter="lunch">Lunch</button>
+        <button class="chip" data-filter="snack">Snack</button>
+        <button class="chip" data-filter="dinner">Dinner</button>
+        <button class="chip" data-filter="prebed">Pre-bed</button>
+        <button class="chip" data-filter="custom">Custom</button>
+      </div>
+
+      <div class="meal-grid" id="mealGrid"></div>
+    </aside>
+  </main>
+
+  <footer class="app-footer">
+    <span class="user-info">
+      <strong id="userEmail">…</strong>
+      <a class="signout-link" id="signOutBtn">sign out</a>
+    </span>
+    <span>1.5 g/kg LBM protein · ≤30g fat · ≤30g carbs · 1000–1250 kcal</span>
+    <div class="fishoil-status">
+      <span>Fish oil taken</span>
+      <div class="fishoil-toggle" id="fishToggle"></div>
+    </div>
+  </footer>
+</div>
+
+<!-- ===================================================== Builder modal -->
+<div class="modal-overlay" id="builderModal">
+  <div class="modal">
+    <button class="modal-close" data-close>×</button>
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Build a meal</div>
+        <div class="modal-subtitle">pick ingredients · set grams · macros auto-calculate</div>
+      </div>
+    </div>
+
+    <div class="builder-grid">
+      <div class="builder-section">
+        <h3>Ingredient catalog</h3>
+        <input type="text" class="search-input" id="ingSearch" placeholder="Search ingredient…" style="margin-bottom: 10px;"/>
+        <div class="ingredient-list" id="ingList"></div>
+      </div>
+      <div class="builder-section">
+        <h3>Added <span id="addedCount" style="color: var(--text-secondary);"></span></h3>
+        <div class="added-list" id="addedList"></div>
+      </div>
+    </div>
+
+    <div class="builder-totals" id="builderTotals">
+      <div class="bt-cell kcal"><span class="v" id="bt-kcal">0</span><span class="l">kcal</span></div>
+      <div class="bt-cell protein"><span class="v" id="bt-protein">0</span><span class="l">protein g</span></div>
+      <div class="bt-cell fat"><span class="v" id="bt-fat">0</span><span class="l">fat g</span></div>
+      <div class="bt-cell carbs"><span class="v" id="bt-carbs">0</span><span class="l">carbs g</span></div>
+    </div>
+
+    <div class="modal-row">
+      <input type="text" class="text-input" id="mealName" placeholder="Name this meal (e.g. 'Cod + greens')"/>
+      <select class="text-input" id="mealCategory" style="flex: 0 0 140px;">
+        <option value="breakfast">Breakfast</option>
+        <option value="lunch">Lunch</option>
+        <option value="snack">Snack</option>
+        <option value="dinner">Dinner</option>
+        <option value="prebed">Pre-bed</option>
+      </select>
+      <button class="btn btn-primary" id="saveMealBtn">Save meal</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================================================== Celebration overlay -->
+<div class="celebration" id="celebration">
+  <div class="celebration-card">
+    <div class="cel-title">Day complete</div>
+    <div class="cel-subtitle">all four targets met</div>
+    <div class="cel-totals">
+      <div><strong id="cel-kcal">0</strong><span>kcal</span></div>
+      <div><strong id="cel-protein">0</strong><span>protein</span></div>
+      <div><strong id="cel-fat">0</strong><span>fat</span></div>
+      <div><strong id="cel-carbs">0</strong><span>carbs</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   PSMF Tracker — application logic (Supabase-backed)
+   ============================================================ */
+
+/* ────────────────────────────────────────────────────────────
+   STEP 1: PASTE YOUR SUPABASE CREDENTIALS BELOW
+   ────────────────────────────────────────────────────────────
+   Get these from your Supabase project at:
+     Settings → API → Project URL and anon public key
+   Both values are safe to expose in client-side code; the real
+   security comes from Row Level Security policies in the database.
+   ──────────────────────────────────────────────────────────── */
+const SUPABASE_CONFIG = {
+  url:     'https://dysyrwegcnohjgoqqonn.supabase.co',
+  anonKey: '7e97ef66-5afc-48b0-a2ba-4839b2b4bc91'
+};
+
+/* ============================================================
+   Constants: macro budgets for a PSMF day
+   ============================================================ */
+const BUDGET = {
+  kcal:    { ideal: 1100, max: 1250, min: 1000 },
+  protein: { floor: 150,  ideal: 165 },
+  fat:     { cap: 30 },
+  carbs:   { cap: 30 }
+};
+
+/* The five meal slots in order, with suggested times and hints */
+const SLOTS = [
+  { id: 0, name: 'Post-walk breakfast', time: '09:30', hint: 'whey, yogurt, or pea protein' },
+  { id: 1, name: 'Lunch',               time: '13:00', hint: 'lean protein on big salad' },
+  { id: 2, name: 'Mid-afternoon snack', time: '16:30', hint: 'biltong + cottage cheese' },
+  { id: 3, name: 'Dinner',              time: '19:30', hint: 'white fish + steamed veg' },
+  { id: 4, name: 'Pre-bed casein',      time: '22:00', hint: 'cottage cheese or Greek yogurt' }
+];
+
+/* Default seed library — lives in client code, NOT in the database.
+   Every user sees the same defaults; their custom meals come from Supabase. */
+const DEFAULT_MEALS = [
+  { id: 'plan-a-1', name: 'Yogurt + whey bowl', desc: '200g 0% Greek yogurt + 30g whey isolate, cinnamon',
+    category: 'breakfast', kcal: 225, protein: 45, fat: 0.5, carbs: 9 },
+  { id: 'plan-a-2', name: 'Chicken on greens', desc: '175g chicken breast on 250g mixed salad, ACV dressing',
+    category: 'lunch', kcal: 340, protein: 57, fat: 6, carbs: 10 },
+  { id: 'plan-a-3', name: 'Biltong + cottage cheese', desc: '40g biltong + 100g 0% cottage cheese',
+    category: 'snack', kcal: 155, protein: 30, fat: 1.2, carbs: 4 },
+  { id: 'plan-a-4', name: 'Cod + steamed veg', desc: '200g cod, broccoli/asparagus/green beans, 1 tsp olive oil',
+    category: 'dinner', kcal: 280, protein: 46, fat: 7, carbs: 12 },
+  { id: 'plan-a-5', name: 'Pre-bed cottage cheese', desc: '150g 0% cottage cheese, cinnamon, vanilla',
+    category: 'prebed', kcal: 80, protein: 15, fat: 0, carbs: 5 },
+
+  { id: 'plan-b-1', name: 'Pea-rice protein shake', desc: '40g pea-rice blend, almond milk, spinach, psyllium',
+    category: 'breakfast', kcal: 200, protein: 30, fat: 5, carbs: 6 },
+  { id: 'plan-b-2', name: 'Tofu scramble', desc: '150g extra-firm tofu, mushrooms, spinach, peppers, nooch',
+    category: 'lunch', kcal: 270, protein: 28, fat: 11.5, carbs: 12 },
+  { id: 'plan-b-3', name: 'Biltong-only snack', desc: '50g biltong + 100g cottage cheese',
+    category: 'snack', kcal: 180, protein: 35, fat: 1.5, carbs: 4 },
+
+  { id: 'plan-c-1', name: 'Tuna salad bowl', desc: '180g tuna (in water) on 200g salad mix, balsamic',
+    category: 'lunch', kcal: 260, protein: 48, fat: 2.5, carbs: 8 },
+  { id: 'plan-c-2', name: 'Microwave chicken + veg', desc: '200g chicken breast, 250g frozen mixed veg',
+    category: 'dinner', kcal: 400, protein: 67, fat: 6.5, carbs: 12 },
+  { id: 'plan-c-3', name: 'Pre-bed Greek yogurt', desc: '200g 0% Greek yogurt',
+    category: 'prebed', kcal: 115, protein: 20, fat: 0, carbs: 8 },
+
+  { id: 'q-1', name: 'Whey shake (water)', desc: '30g whey isolate in 300ml water',
+    category: 'breakfast', kcal: 110, protein: 25, fat: 0.5, carbs: 1 },
+  { id: 'q-2', name: 'Egg-white omelette', desc: '300g egg whites with spinach + 1 tsp oil',
+    category: 'breakfast', kcal: 200, protein: 33, fat: 5, carbs: 3 },
+  { id: 'q-3', name: 'Prawns on greens', desc: '200g cooked prawns, big salad, lemon',
+    category: 'lunch', kcal: 220, protein: 42, fat: 2.5, carbs: 8 },
+  { id: 'q-4', name: 'Smoked salmon plate', desc: '100g smoked salmon, cucumber, capers',
+    category: 'snack', kcal: 200, protein: 24, fat: 11, carbs: 1 }
+];
+
+/* Ingredient catalog (per 100g) for the meal builder */
+const INGREDIENTS = [
+  { id: 'chicken',      name: 'Chicken breast (cooked)',   p: 31, f: 3.6, c: 0,   k: 165 },
+  { id: 'cod',          name: 'Cod fillet (cooked)',       p: 18, f: 0.7, c: 0,   k: 82  },
+  { id: 'haddock',      name: 'Haddock fillet (cooked)',   p: 20, f: 0.8, c: 0,   k: 90  },
+  { id: 'tuna',         name: 'Tuna in spring water',      p: 25, f: 1,   c: 0,   k: 116 },
+  { id: 'salmon',       name: 'Salmon fillet',             p: 20, f: 13,  c: 0,   k: 208 },
+  { id: 'prawns',       name: 'Prawns (cooked)',           p: 20, f: 1,   c: 0,   k: 99  },
+  { id: 'eggwhite',     name: 'Egg white',                 p: 11, f: 0.2, c: 0.7, k: 52  },
+  { id: 'wholeegg',     name: 'Whole egg',                 p: 12, f: 10,  c: 1,   k: 143 },
+  { id: 'biltong',      name: 'Biltong (lean)',            p: 50, f: 3,   c: 1,   k: 240 },
+  { id: 'gyogurt',      name: '0% Greek yogurt',           p: 10, f: 0.4, c: 4,   k: 59  },
+  { id: 'cottage',      name: '0% cottage cheese',         p: 11, f: 0.3, c: 3.4, k: 57  },
+  { id: 'whey',         name: 'Whey isolate (powder)',     p: 82, f: 1,   c: 4,   k: 370 },
+  { id: 'peaprotein',   name: 'Pea-rice protein (powder)', p: 80, f: 5,   c: 5,   k: 370 },
+  { id: 'tofu',         name: 'Extra-firm tofu',           p: 14, f: 8,   c: 2,   k: 140 },
+  { id: 'tempeh',       name: 'Tempeh',                    p: 19, f: 11,  c: 9,   k: 190 },
+  { id: 'cheesestring', name: 'Mozzarella cheese string',  p: 25, f: 22,  c: 2.5, k: 310 },
+  { id: 'broccoli',     name: 'Broccoli (cooked)',         p: 3,  f: 0.4, c: 7,   k: 35  },
+  { id: 'spinach',      name: 'Spinach (raw)',             p: 3,  f: 0.4, c: 4,   k: 23  },
+  { id: 'asparagus',    name: 'Asparagus',                 p: 2,  f: 0.1, c: 4,   k: 20  },
+  { id: 'greenbeans',   name: 'Green beans',               p: 2,  f: 0.1, c: 7,   k: 31  },
+  { id: 'cauliflower',  name: 'Cauliflower',               p: 2,  f: 0.3, c: 5,   k: 25  },
+  { id: 'mushrooms',    name: 'Mushrooms',                 p: 3,  f: 0.3, c: 3,   k: 22  },
+  { id: 'pepper',       name: 'Bell pepper',               p: 1,  f: 0.3, c: 6,   k: 31  },
+  { id: 'cucumber',     name: 'Cucumber',                  p: 0.7,f: 0.1, c: 4,   k: 16  },
+  { id: 'tomato',       name: 'Tomato',                    p: 0.9,f: 0.2, c: 4,   k: 18  },
+  { id: 'leaves',       name: 'Mixed salad leaves',        p: 1.5,f: 0.2, c: 3,   k: 20  },
+  { id: 'oliveoil',     name: 'Olive oil',                 p: 0,  f: 100, c: 0,   k: 900 },
+  { id: 'nooch',        name: 'Nutritional yeast',         p: 50, f: 4,   c: 36,  k: 380 }
+];
+
+/* ============================================================
+   Supabase client (initialized in boot())
+   ============================================================ */
+let sb = null;       // the Supabase client instance
+let currentUser = null;  // the auth user object, or null when signed out
+
+/* ============================================================
+   Application state — same shape as the artifact version
+   ============================================================ */
+const state = {
+  currentDay: 'thursday',
+  meals: [],
+  logs: {
+    thursday: [null,null,null,null,null],
+    sunday:   [null,null,null,null,null]
+  },
+  streak: 0,
+  fishoil: false,
+  filter: 'all',
+  search: '',
+  builder: { added: [] }
+};
+
+/* ============================================================
+   SUPABASE DATA ACCESS LAYER
+   All functions are thin wrappers around supabase-js calls.
+   Each one returns plain JS values so the rest of the app
+   doesn't need to know it's talking to a database.
+   ============================================================ */
+
+/* Fetch all custom meals belonging to the current user.
+   RLS automatically scopes the query — we don't need a WHERE clause. */
+async function fetchCustomMeals() {
+  const { data, error } = await sb
+    .from('meals')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { console.error('fetchCustomMeals:', error); return []; }
+  // Reshape DB columns into the same format as DEFAULT_MEALS
+  return (data || []).map(row => ({
+    id: row.id,
+    name: row.name,
+    desc: row.description || '',
+    category: row.category,
+    kcal: Number(row.kcal),
+    protein: Number(row.protein),
+    fat: Number(row.fat),
+    carbs: Number(row.carbs),
+    custom: true
+  }));
+}
+
+/* Insert a new custom meal and return its DB-assigned ID */
+async function insertCustomMeal(meal) {
+  if (!currentUser) return null;
+  const { data, error } = await sb
+    .from('meals')
+    .insert({
+      user_id: currentUser.id,
+      name: meal.name,
+      description: meal.desc,
+      category: meal.category,
+      kcal: meal.kcal, protein: meal.protein, fat: meal.fat, carbs: meal.carbs
+    })
+    .select()
+    .single();
+  if (error) { console.error('insertCustomMeal:', error); return null; }
+  return { ...meal, id: data.id, custom: true };
+}
+
+/* Delete a custom meal AND any day_logs referencing it.
+   Default meals (with non-UUID ids like 'plan-a-1') will never reach here
+   because the UI hides the delete button on non-custom cards. */
+async function deleteCustomMealRow(id) {
+  const { error: e1 } = await sb.from('meals').delete().eq('id', id);
+  if (e1) console.error('deleteCustomMealRow meals:', e1);
+  const { error: e2 } = await sb.from('day_logs').delete().eq('meal_id', id);
+  if (e2) console.error('deleteCustomMealRow day_logs:', e2);
+}
+
+/* Fetch the slot assignments for one day (thursday or sunday).
+   Returns an array of length 5 with meal_id or null at each index. */
+async function fetchDayLog(dayKey) {
+  const log = [null, null, null, null, null];
+  const { data, error } = await sb
+    .from('day_logs')
+    .select('slot_index, meal_id')
+    .eq('day_key', dayKey);
+  if (error) { console.error('fetchDayLog:', error); return log; }
+  (data || []).forEach(row => {
+    if (row.slot_index >= 0 && row.slot_index < 5) {
+      log[row.slot_index] = row.meal_id;
+    }
+  });
+  return log;
+}
+
+/* Upsert a slot assignment: if a meal is already in this slot,
+   it gets overwritten; otherwise a new row is inserted. */
+async function upsertSlot(dayKey, slotIndex, mealId) {
+  if (!currentUser) return;
+  const { error } = await sb
+    .from('day_logs')
+    .upsert({
+      user_id: currentUser.id,
+      day_key: dayKey,
+      slot_index: slotIndex,
+      meal_id: mealId,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id,day_key,slot_index' });
+  if (error) console.error('upsertSlot:', error);
+}
+
+/* Clear a single slot */
+async function clearSlot(dayKey, slotIndex) {
+  const { error } = await sb
+    .from('day_logs')
+    .delete()
+    .eq('day_key', dayKey)
+    .eq('slot_index', slotIndex);
+  if (error) console.error('clearSlot:', error);
+}
+
+/* Clear all slots for a day */
+async function clearDayRows(dayKey) {
+  const { error } = await sb.from('day_logs').delete().eq('day_key', dayKey);
+  if (error) console.error('clearDayRows:', error);
+}
+
+/* Fetch user_state. The signup trigger should have created the row,
+   but we defensively create one if missing (e.g., if RLS or trigger failed). */
+async function fetchUserState() {
+  const { data, error } = await sb.from('user_state').select('*').maybeSingle();
+  if (error) { console.error('fetchUserState:', error); return { streak: 0, fishoil: false }; }
+  if (!data) {
+    // No row — create one
+    if (currentUser) {
+      await sb.from('user_state').insert({ user_id: currentUser.id });
+    }
+    return { streak: 0, fishoil: false };
+  }
+  return { streak: data.streak || 0, fishoil: !!data.fishoil };
+}
+
+/* Update user_state. Uses upsert so missing rows are handled gracefully. */
+async function updateUserState(patch) {
+  if (!currentUser) return;
+  const { error } = await sb
+    .from('user_state')
+    .upsert({
+      user_id: currentUser.id,
+      ...patch,
+      updated_at: new Date().toISOString()
+    });
+  if (error) console.error('updateUserState:', error);
+}
+
+/* ============================================================
+   AUTHENTICATION
+   ============================================================ */
+
+/* Validate that the user has actually pasted real credentials.
+   If the placeholders are still in place, show the config-error screen. */
+function configIsValid() {
+  return SUPABASE_CONFIG.url
+      && SUPABASE_CONFIG.anonKey
+      && !SUPABASE_CONFIG.url.includes('YOUR-PROJECT-ID')
+      && !SUPABASE_CONFIG.anonKey.includes('YOUR-ANON-KEY');
+}
+
+/* Sign in with email + password */
+async function signIn(email, password) {
+  const { data, error } = await sb.auth.signInWithPassword({ email, password });
+  return { user: data?.user || null, error };
+}
+
+/* Sign up with email + password.
+   If Supabase Auth has email confirmation enabled, the user object will exist
+   but session will be null until they confirm. The README explains how to
+   disable email confirmation for a frictionless personal-tracker experience. */
+async function signUp(email, password) {
+  const { data, error } = await sb.auth.signUp({ email, password });
+  return { user: data?.user || null, session: data?.session || null, error };
+}
+
+/* Sign out the current session */
+async function signOut() {
+  await sb.auth.signOut();
+}
+
+/* ============================================================
+   BOOT
+   ============================================================ */
+async function boot() {
+  // 1. Check config
+  if (!configIsValid()) {
+    document.getElementById('bootLoading').classList.add('hidden');
+    document.getElementById('configError').classList.add('visible');
+    return;
+  }
+
+  // 2. Initialize Supabase client
+  sb = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey, {
+    auth: { persistSession: true, autoRefreshToken: true }
+  });
+
+  // 3. Check existing session
+  const { data: { session } } = await sb.auth.getSession();
+
+  if (session?.user) {
+    await initAuthenticatedApp(session.user);
+  } else {
+    showAuthScreen();
+  }
+
+  // 4. Listen for future auth state changes (sign in / sign out from anywhere)
+  sb.auth.onAuthStateChange(async (event, session) => {
+    if (event === 'SIGNED_IN' && session?.user && !currentUser) {
+      await initAuthenticatedApp(session.user);
+    } else if (event === 'SIGNED_OUT') {
+      currentUser = null;
+      hideAppShowAuth();
+    }
+  });
+}
+
+/* Hide loading, show auth screen */
+function showAuthScreen() {
+  document.getElementById('bootLoading').classList.add('hidden');
+  document.getElementById('authScreen').classList.add('visible');
+  document.getElementById('app').classList.remove('visible');
+}
+
+/* Hide app, show auth screen (used on sign-out) */
+function hideAppShowAuth() {
+  document.getElementById('app').classList.remove('visible');
+  document.getElementById('authScreen').classList.add('visible');
+  // Reset state so a different user's data can't bleed across
+  state.meals = [];
+  state.logs.thursday = [null,null,null,null,null];
+  state.logs.sunday   = [null,null,null,null,null];
+  state.streak = 0;
+  state.fishoil = false;
+}
+
+/* Hydrate state from Supabase and reveal the app */
+async function initAuthenticatedApp(user) {
+  currentUser = user;
+
+  // Hydrate state in parallel (each query is independent)
+  const [customMeals, thuLog, sunLog, userState] = await Promise.all([
+    fetchCustomMeals(),
+    fetchDayLog('thursday'),
+    fetchDayLog('sunday'),
+    fetchUserState()
+  ]);
+
+  // Merge default + custom meals (customs first so they show at the top)
+  state.meals = [...customMeals, ...DEFAULT_MEALS];
+  state.logs.thursday = thuLog;
+  state.logs.sunday   = sunLog;
+  state.streak  = userState.streak;
+  state.fishoil = userState.fishoil;
+
+  // Show user email in the footer
+  document.getElementById('userEmail').textContent = user.email || '(signed in)';
+
+  // Switch UI from auth screen to app
+  document.getElementById('bootLoading').classList.add('hidden');
+  document.getElementById('authScreen').classList.remove('visible');
+  document.getElementById('app').classList.add('visible');
+
+  // Do the initial render
+  setDateLabels();
+  renderSlots();
+  renderLibrary();
+  renderTotals();
+  renderStreak();
+  renderFishoil();
+
+  // Bind UI events (only once — but boot() may be called once per session)
+  if (!window.__appEventsBound) {
+    bindAppEvents();
+    window.__appEventsBound = true;
+  }
+}
+
+/* ============================================================
+   AUTH UI HANDLERS
+   ============================================================ */
+let authMode = 'signin';   // or 'signup'
+
+function setAuthMode(mode) {
+  authMode = mode;
+  document.querySelectorAll('[data-auth-tab]').forEach(t => {
+    t.classList.toggle('active', t.dataset.authTab === mode);
+  });
+  document.getElementById('authSubmitText').textContent =
+    mode === 'signin' ? 'Sign in' : 'Create account';
+  document.getElementById('authPassword').setAttribute(
+    'autocomplete', mode === 'signin' ? 'current-password' : 'new-password'
+  );
+  setAuthMessage('', '');
+}
+
+function setAuthMessage(text, kind) {
+  const el = document.getElementById('authMessage');
+  el.textContent = text;
+  el.className = 'auth-message' + (kind ? ' ' + kind : '');
+}
+
+async function handleAuthSubmit(e) {
+  e.preventDefault();
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const btn = document.getElementById('authSubmit');
+
+  if (!email || !password) return;
+  btn.disabled = true;
+  setAuthMessage('Working…', '');
+
+  if (authMode === 'signin') {
+    const { user, error } = await signIn(email, password);
+    if (error) {
+      setAuthMessage(error.message, 'error');
+      btn.disabled = false;
+      return;
+    }
+    // onAuthStateChange will fire and call initAuthenticatedApp
+    setAuthMessage('Signed in. Loading…', 'success');
+  } else {
+    const { user, session, error } = await signUp(email, password);
+    if (error) {
+      setAuthMessage(error.message, 'error');
+      btn.disabled = false;
+      return;
+    }
+    if (session) {
+      // Email confirmation is disabled — they're signed in immediately
+      setAuthMessage('Account created. Loading…', 'success');
+    } else {
+      // Email confirmation is enabled — they need to click the link
+      setAuthMessage('Check your email for a confirmation link, then sign in.', 'success');
+      btn.disabled = false;
+      setAuthMode('signin');
+    }
+  }
+}
+
+function bindAuthEvents() {
+  document.querySelectorAll('[data-auth-tab]').forEach(t => {
+    t.addEventListener('click', () => setAuthMode(t.dataset.authTab));
+  });
+  document.getElementById('authForm').addEventListener('submit', handleAuthSubmit);
+}
+
+/* ============================================================
+   DATE LABELS
+   ============================================================ */
+function setDateLabels() {
+  const today = new Date();
+  const day = today.getDay();
+
+  function nextDow(target) {
+    const d = new Date(today);
+    const diff = (target - d.getDay() + 7) % 7;
+    d.setDate(d.getDate() + diff);
+    return d;
+  }
+  const thu = nextDow(4);
+  const sun = nextDow(0);
+  const fmt = (d) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short' });
+  document.getElementById('thu-date').textContent = ' · ' + fmt(thu);
+  document.getElementById('sun-date').textContent = ' · ' + fmt(sun);
+
+  if (day === 0) state.currentDay = 'sunday';
+  else if (day >= 4) state.currentDay = day === 4 ? 'thursday' : 'sunday';
+  else state.currentDay = 'thursday';
+  document.querySelectorAll('.day-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.day === state.currentDay);
+  });
+}
+
+/* ============================================================
+   RENDERING
+   ============================================================ */
+function renderSlots() {
+  const container = document.getElementById('slots');
+  const log = state.logs[state.currentDay];
+  container.innerHTML = '';
+
+  SLOTS.forEach((slot, i) => {
+    const mealId = log[i];
+    const meal = mealId ? state.meals.find(m => m.id === mealId) : null;
+    const el = document.createElement('div');
+    el.className = 'slot' + (meal ? ' filled' : '');
+    el.dataset.slotIndex = i;
+    if (meal) {
+      el.innerHTML = `
+        <div class="slot-index">0${i+1}</div>
+        <div class="slot-meta">
+          <div class="slot-name">${slot.name}</div>
+          <div class="slot-time">${slot.time}</div>
+        </div>
+        <div class="slot-meal">
+          <div>
+            <div class="slot-meal-title">${escapeHtml(meal.name)}</div>
+            <div class="slot-meal-macros">
+              <span class="m-kcal">${meal.kcal} kcal</span>
+              <span class="m-protein">${meal.protein}P</span>
+              <span class="m-fat">${meal.fat}F</span>
+              <span class="m-carbs">${meal.carbs}C</span>
+            </div>
+          </div>
+          <button class="slot-remove" data-remove="${i}" title="Remove">×</button>
+        </div>
+      `;
+    } else {
+      el.innerHTML = `
+        <div class="slot-index">0${i+1}</div>
+        <div class="slot-meta">
+          <div class="slot-name">${slot.name}</div>
+          <div class="slot-time">${slot.time}</div>
+        </div>
+        <div class="slot-empty-hint">${slot.hint}</div>
+      `;
+    }
+    container.appendChild(el);
+  });
+
+  container.querySelectorAll('[data-remove]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      const idx = parseInt(btn.dataset.remove);
+      removeMealFromSlot(idx);
+    });
+  });
+}
+
+function renderLibrary() {
+  const grid = document.getElementById('mealGrid');
+  const search = state.search.trim().toLowerCase();
+  const filtered = state.meals.filter(m => {
+    if (state.filter === 'custom' && !m.custom) return false;
+    if (state.filter !== 'all' && state.filter !== 'custom' && m.category !== state.filter) return false;
+    if (search && !(m.name.toLowerCase().includes(search) || (m.desc || '').toLowerCase().includes(search))) return false;
+    return true;
+  });
+
+  document.getElementById('libCount').textContent = `${filtered.length} meal${filtered.length===1?'':'s'}`;
+
+  grid.innerHTML = '';
+  filtered.forEach(meal => {
+    const el = document.createElement('div');
+    el.className = 'meal-card' + (meal.custom ? ' custom' : '');
+    el.dataset.mealId = meal.id;
+    el.innerHTML = `
+      <div class="meal-card-name">${escapeHtml(meal.name)}</div>
+      <div class="meal-card-desc">${escapeHtml(meal.desc || '')}</div>
+      <div class="meal-card-macros">
+        <div><span class="v m-kcal">${meal.kcal}</span><span class="l">kcal</span></div>
+        <div><span class="v m-protein">${meal.protein}</span><span class="l">P</span></div>
+        <div><span class="v m-fat">${meal.fat}</span><span class="l">F</span></div>
+        <div><span class="v m-carbs">${meal.carbs}</span><span class="l">C</span></div>
+      </div>
+      ${meal.custom ? `<button class="meal-card-delete" data-delete="${meal.id}" title="Delete">×</button>` : ''}
+    `;
+    grid.appendChild(el);
+    bindDrag(el);
+  });
+
+  grid.querySelectorAll('[data-delete]').forEach(btn => {
+    btn.addEventListener('click', e => {
+      e.stopPropagation();
+      e.preventDefault();
+      const id = btn.dataset.delete;
+      deleteCustomMeal(id);
+    });
+  });
+}
+
+function totals() {
+  const log = state.logs[state.currentDay];
+  let kcal=0, p=0, f=0, c=0;
+  for (const id of log) {
+    if (!id) continue;
+    const meal = state.meals.find(m => m.id === id);
+    if (!meal) continue;
+    kcal += meal.kcal; p += meal.protein; f += meal.fat; c += meal.carbs;
+  }
+  if (state.fishoil) { f += 10; kcal += 90; }
+  return { kcal, protein: round(p,1), fat: round(f,1), carbs: round(c,1) };
+}
+
+function renderTotals() {
+  const t = totals();
+
+  setText('m-kcal-current',    t.kcal);
+  setText('m-protein-current', formatG(t.protein));
+  setText('m-fat-current',     formatG(t.fat));
+  setText('m-carbs-current',   formatG(t.carbs));
+
+  setRing('kcal',    t.kcal / BUDGET.kcal.max);
+  setMacroState('kcal',
+      t.kcal > BUDGET.kcal.max ? 'over' :
+      (t.kcal >= BUDGET.kcal.min ? 'met' : ''));
+
+  setRing('protein', t.protein / BUDGET.protein.floor);
+  setMacroState('protein', t.protein >= BUDGET.protein.floor ? 'met' : '');
+
+  setRing('fat', t.fat / BUDGET.fat.cap);
+  setMacroState('fat', t.fat > BUDGET.fat.cap ? 'over' : '');
+
+  setRing('carbs', t.carbs / BUDGET.carbs.cap);
+  setMacroState('carbs', t.carbs > BUDGET.carbs.cap ? 'over' : '');
+
+  const filledCount = state.logs[state.currentDay].filter(x => x).length;
+  const dayComplete =
+    t.kcal >= BUDGET.kcal.min && t.kcal <= BUDGET.kcal.max &&
+    t.protein >= BUDGET.protein.floor &&
+    t.fat <= BUDGET.fat.cap &&
+    t.carbs <= BUDGET.carbs.cap &&
+    filledCount >= 4;
+
+  const logBtn = document.getElementById('logBtn');
+  logBtn.disabled = !dayComplete;
+  logBtn.style.opacity = dayComplete ? '1' : '0.4';
+  logBtn.style.cursor = dayComplete ? 'pointer' : 'not-allowed';
+}
+
+function setRing(key, ratio) {
+  const r = clamp(ratio, 0, 1.2);
+  const circ = 2 * Math.PI * 30;
+  const visible = Math.min(r, 1) * circ;
+  document.getElementById('ring-' + key).style.strokeDashoffset = circ - visible;
+  document.getElementById('pct-' + key).textContent = Math.round(r * 100) + '%';
+}
+
+function setMacroState(key, cls) {
+  const card = document.querySelector(`.macro-card[data-macro="${key}"]`);
+  card.classList.remove('met', 'over');
+  if (cls) card.classList.add(cls);
+}
+
+function renderStreak() {
+  document.getElementById('streakValue').textContent = state.streak;
+}
+
+function renderFishoil() {
+  document.getElementById('fishToggle').classList.toggle('on', state.fishoil);
+}
+
+/* ============================================================
+   MUTATIONS — these update state, persist to Supabase, re-render
+   ============================================================ */
+async function addMealToSlot(slotIdx, mealId, dropElement) {
+  state.logs[state.currentDay][slotIdx] = mealId;
+  await upsertSlot(state.currentDay, slotIdx, mealId);
+  renderSlots();
+  renderTotals();
+  if (dropElement) spawnBurst(dropElement);
+}
+
+async function removeMealFromSlot(slotIdx) {
+  state.logs[state.currentDay][slotIdx] = null;
+  await clearSlot(state.currentDay, slotIdx);
+  renderSlots();
+  renderTotals();
+}
+
+async function resetDay() {
+  state.logs[state.currentDay] = [null,null,null,null,null];
+  await clearDayRows(state.currentDay);
+  renderSlots();
+  renderTotals();
+}
+
+async function logDay() {
+  state.streak += 1;
+  await updateUserState({ streak: state.streak });
+  renderStreak();
+  showCelebration();
+  setTimeout(() => { resetDay(); }, 1800);
+}
+
+async function deleteCustomMeal(id) {
+  state.meals = state.meals.filter(m => m.id !== id);
+  ['thursday','sunday'].forEach(d => {
+    state.logs[d] = state.logs[d].map(x => x === id ? null : x);
+  });
+  await deleteCustomMealRow(id);
+  renderLibrary();
+  renderSlots();
+  renderTotals();
+}
+
+/* ============================================================
+   DRAG + DROP (Pointer Events; works on touch and mouse)
+   ============================================================ */
+function bindDrag(card) {
+  card.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('[data-delete]')) return;
+    if (e.button === 2) return;
+    e.preventDefault();
+
+    const rect = card.getBoundingClientRect();
+    const offX = e.clientX - rect.left;
+    const offY = e.clientY - rect.top;
+
+    const ghost = card.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    ghost.style.width = rect.width + 'px';
+    document.body.appendChild(ghost);
+    positionGhost(e.clientX, e.clientY);
+
+    function positionGhost(x, y) {
+      ghost.style.left = (x - offX) + 'px';
+      ghost.style.top  = (y - offY) + 'px';
+    }
+
+    let lastSlot = null;
+
+    function onMove(ev) {
+      positionGhost(ev.clientX, ev.clientY);
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const slot = under?.closest('.slot');
+      if (slot !== lastSlot) {
+        if (lastSlot) lastSlot.classList.remove('drag-over');
+        if (slot) slot.classList.add('drag-over');
+        lastSlot = slot;
+      }
+    }
+
+    async function onUp(ev) {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onUp);
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const slot = under?.closest('.slot');
+      if (slot) {
+        slot.classList.remove('drag-over');
+        const idx = parseInt(slot.dataset.slotIndex);
+        await addMealToSlot(idx, card.dataset.mealId, slot);
+      }
+      ghost.remove();
+      if (lastSlot) lastSlot.classList.remove('drag-over');
+    }
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onUp);
+  });
+
+  // Tap-to-add fallback for mobile users
+  card.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-delete]')) return;
+    const log = state.logs[state.currentDay];
+    const nextEmpty = log.findIndex(x => !x);
+    if (nextEmpty === -1) return;
+    const slotEl = document.querySelector(`.slot[data-slot-index="${nextEmpty}"]`);
+    await addMealToSlot(nextEmpty, card.dataset.mealId, slotEl);
+  });
+}
+
+/* ============================================================
+   BURST + CELEBRATION
+   ============================================================ */
+function spawnBurst(target) {
+  const rect = target.getBoundingClientRect();
+  const cx = rect.left + rect.width / 2;
+  const cy = rect.top + rect.height / 2;
+  const colors = ['var(--protein)', 'var(--kcal)', 'var(--carbs)', 'var(--fat)'];
+  for (let i = 0; i < 9; i++) {
+    const p = document.createElement('div');
+    p.className = 'burst';
+    p.style.left = cx + 'px';
+    p.style.top = cy + 'px';
+    p.style.background = colors[i % colors.length];
+    const angle = (i / 9) * Math.PI * 2;
+    const dist = 50 + Math.random() * 30;
+    p.style.setProperty('--bx', (Math.cos(angle) * dist) + 'px');
+    p.style.setProperty('--by', (Math.sin(angle) * dist) + 'px');
+    document.body.appendChild(p);
+    setTimeout(() => p.remove(), 800);
+  }
+}
+
+function showCelebration() {
+  const t = totals();
+  document.getElementById('cel-kcal').textContent    = t.kcal;
+  document.getElementById('cel-protein').textContent = formatG(t.protein);
+  document.getElementById('cel-fat').textContent     = formatG(t.fat);
+  document.getElementById('cel-carbs').textContent   = formatG(t.carbs);
+  const cel = document.getElementById('celebration');
+  cel.classList.add('show');
+
+  const colors = ['#6ee7b7', '#c4b5fd', '#60a5fa', '#fbbf24', '#f87171'];
+  for (let i = 0; i < 70; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.left = Math.random() * 100 + 'vw';
+    c.style.top = '-20px';
+    c.style.background = colors[Math.floor(Math.random() * colors.length)];
+    c.style.transform = `rotate(${Math.random() * 360}deg)`;
+    c.style.animation = `confetti-fall ${2 + Math.random() * 1.5}s linear ${Math.random() * 0.5}s forwards`;
+    cel.appendChild(c);
+    setTimeout(() => c.remove(), 4000);
+  }
+
+  setTimeout(() => cel.classList.remove('show'), 2200);
+}
+
+/* ============================================================
+   BUILDER MODAL
+   ============================================================ */
+let ingSearchTerm = '';
+
+function openBuilder() {
+  state.builder.added = [];
+  document.getElementById('mealName').value = '';
+  document.getElementById('mealCategory').value = 'lunch';
+  document.getElementById('ingSearch').value = '';
+  ingSearchTerm = '';
+  renderIngredients();
+  renderAdded();
+  document.getElementById('builderModal').classList.add('open');
+}
+
+function closeBuilder() {
+  document.getElementById('builderModal').classList.remove('open');
+}
+
+function renderIngredients() {
+  const list = document.getElementById('ingList');
+  const term = ingSearchTerm.trim().toLowerCase();
+  const filtered = INGREDIENTS.filter(i => !term || i.name.toLowerCase().includes(term));
+  list.innerHTML = '';
+  filtered.forEach(ing => {
+    const el = document.createElement('div');
+    el.className = 'ing-item';
+    el.innerHTML = `
+      <div>
+        <div class="ing-name">${escapeHtml(ing.name)}</div>
+        <div class="ing-macros">per 100g · ${ing.k} kcal · ${ing.p}P · ${ing.f}F · ${ing.c}C</div>
+      </div>
+      <button class="btn-add-ing" data-ing="${ing.id}">＋ add</button>
+    `;
+    list.appendChild(el);
+  });
+  list.querySelectorAll('[data-ing]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const ing = INGREDIENTS.find(i => i.id === btn.dataset.ing);
+      const defaultGrams =
+        ing.id === 'oliveoil' ? 5 :
+        (ing.id === 'whey' || ing.id === 'peaprotein') ? 30 :
+        ing.id === 'biltong' ? 40 :
+        (ing.id === 'gyogurt' || ing.id === 'cottage') ? 150 :
+        ing.id === 'nooch' ? 5 :
+        ing.id === 'cheesestring' ? 21 :
+        150;
+      state.builder.added.push({ ingId: ing.id, grams: defaultGrams });
+      renderAdded();
+    });
+  });
+}
+
+function renderAdded() {
+  const list = document.getElementById('addedList');
+  list.innerHTML = '';
+  state.builder.added.forEach((a, idx) => {
+    const ing = INGREDIENTS.find(i => i.id === a.ingId);
+    if (!ing) return;
+    const el = document.createElement('div');
+    el.className = 'added-item';
+    el.innerHTML = `
+      <div>${escapeHtml(ing.name)}</div>
+      <input type="number" min="0" step="5" value="${a.grams}" data-grams="${idx}"/>
+      <button class="added-remove" data-rm="${idx}">×</button>
+    `;
+    list.appendChild(el);
+  });
+
+  document.getElementById('addedCount').textContent =
+    state.builder.added.length ? `· ${state.builder.added.length}` : '';
+
+  list.querySelectorAll('[data-grams]').forEach(inp => {
+    inp.addEventListener('input', e => {
+      const idx = parseInt(inp.dataset.grams);
+      state.builder.added[idx].grams = parseFloat(inp.value) || 0;
+      updateBuilderTotals();
+    });
+  });
+  list.querySelectorAll('[data-rm]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.rm);
+      state.builder.added.splice(idx, 1);
+      renderAdded();
+    });
+  });
+  updateBuilderTotals();
+}
+
+function computeBuilderTotals() {
+  let k=0,p=0,f=0,c=0;
+  state.builder.added.forEach(a => {
+    const ing = INGREDIENTS.find(i => i.id === a.ingId);
+    if (!ing) return;
+    const ratio = a.grams / 100;
+    k += ing.k * ratio;
+    p += ing.p * ratio;
+    f += ing.f * ratio;
+    c += ing.c * ratio;
+  });
+  return { kcal: Math.round(k), protein: round(p,1), fat: round(f,1), carbs: round(c,1) };
+}
+
+function updateBuilderTotals() {
+  const t = computeBuilderTotals();
+  document.getElementById('bt-kcal').textContent    = t.kcal;
+  document.getElementById('bt-protein').textContent = formatG(t.protein);
+  document.getElementById('bt-fat').textContent     = formatG(t.fat);
+  document.getElementById('bt-carbs').textContent   = formatG(t.carbs);
+}
+
+async function saveBuiltMeal() {
+  const name = document.getElementById('mealName').value.trim();
+  if (!name) { document.getElementById('mealName').focus(); return; }
+  if (!state.builder.added.length) return;
+
+  const t = computeBuilderTotals();
+  const category = document.getElementById('mealCategory').value;
+  const desc = state.builder.added.map(a => {
+    const ing = INGREDIENTS.find(i => i.id === a.ingId);
+    return `${a.grams}g ${ing?.name || a.ingId}`;
+  }).join(' + ');
+
+  const meal = await insertCustomMeal({
+    name, desc, category,
+    kcal: t.kcal, protein: t.protein, fat: t.fat, carbs: t.carbs
+  });
+  if (!meal) {
+    alert('Could not save meal. Check the browser console for details.');
+    return;
+  }
+  state.meals.unshift(meal);
+  closeBuilder();
+  renderLibrary();
+}
+
+/* ============================================================
+   EVENT WIRING (app interactions, called after first signin)
+   ============================================================ */
+function bindAppEvents() {
+  // Day tab switching
+  document.getElementById('dayTabs').addEventListener('click', e => {
+    const tab = e.target.closest('.day-tab');
+    if (!tab) return;
+    document.querySelectorAll('.day-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    state.currentDay = tab.dataset.day;
+    renderSlots();
+    renderTotals();
+  });
+
+  // Reset / Log
+  document.getElementById('resetBtn').addEventListener('click', resetDay);
+  document.getElementById('logBtn').addEventListener('click', logDay);
+
+  // Library search + filter
+  document.getElementById('searchInput').addEventListener('input', e => {
+    state.search = e.target.value;
+    renderLibrary();
+  });
+  document.getElementById('filters').addEventListener('click', e => {
+    const chip = e.target.closest('.chip');
+    if (!chip) return;
+    document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    state.filter = chip.dataset.filter;
+    renderLibrary();
+  });
+
+  // Builder modal
+  document.getElementById('openBuilder').addEventListener('click', openBuilder);
+  document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', closeBuilder));
+  document.getElementById('builderModal').addEventListener('click', e => {
+    if (e.target.id === 'builderModal') closeBuilder();
+  });
+  document.getElementById('ingSearch').addEventListener('input', e => {
+    ingSearchTerm = e.target.value;
+    renderIngredients();
+  });
+  document.getElementById('saveMealBtn').addEventListener('click', saveBuiltMeal);
+
+  // Fish oil toggle
+  document.getElementById('fishToggle').addEventListener('click', async () => {
+    state.fishoil = !state.fishoil;
+    await updateUserState({ fishoil: state.fishoil });
+    renderFishoil();
+    renderTotals();
+  });
+
+  // Sign out
+  document.getElementById('signOutBtn').addEventListener('click', async (e) => {
+    e.preventDefault();
+    await signOut();
+    // onAuthStateChange handles the UI transition
+  });
+
+  // Escape closes modal
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeBuilder();
+  });
+}
+
+/* ============================================================
+   UTILITIES
+   ============================================================ */
+function escapeHtml(str) {
+  return (str || '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+function setText(id, val) { document.getElementById(id).textContent = val; }
+function clamp(v, lo, hi) { return Math.min(Math.max(v, lo), hi); }
+function round(n, dp) { const m = Math.pow(10, dp); return Math.round(n * m) / m; }
+function formatG(v) {
+  return v % 1 === 0 ? v.toString() : v.toFixed(1);
+}
+
+/* ============================================================
+   GO
+   ============================================================ */
+bindAuthEvents();
+boot();
+</script>
+</body>
+</html>
